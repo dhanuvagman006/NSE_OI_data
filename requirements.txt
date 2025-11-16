@@ -1,8 +1,7 @@
 flask==3.0.0
-pandas==2.1.4
+pandas
 nsepython==2.17
 waitress==2.1.2
 flask-cors==4.0.0
 requests==2.31.0
-numpy==1.24.3
-python-dotenv==1.0.0
+numpy
