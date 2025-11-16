@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ordered Open Interest Chart with Spot Price</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .chart-container { 
+            width: 90%; 
+            margin: auto; 
+            max-width: 1200px; 
+            border: 1px solid #ccc; 
+            padding: 10px; 
+            box-shadow: 2px 2px 5px #aaa;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>{{ symbol }} Open Interest (OI) & Spot Price Comparison</h1>
+        <p>Spot Price (LTP): <strong id="ltp">Loading...</strong> | Last Updated: <span id="crontime">Loading...</span></p>
+        <p>Resistance (Red) and Support (Green) strikes ordered lowest to highest, relative to Spot Price (Blue Line).</p>
+    </div>
+
+    <div class="chart-container" id="oi-ordered-chart">
+        </div>
+
+    <div class="chart-container" style="margin-top: 20px;">
+        <h2>Notes / Key Points</h2>
+        <p>You can use this section to jot down trading observations, hypotheses, or reminders while viewing the OI chart. Your notes will be saved in this browser.</p>
+        <textarea id="notes" style="width: 100%; height: 150px; padding: 8px; box-sizing: border-box;" placeholder="Write your notes here..."></textarea>
+        <div style="margin-top: 10px; text-align: right;">
+            <button id="save-notes" style="padding: 6px 12px;">Save Notes</button>
+            <span id="save-status" style="margin-left: 10px; font-size: 0.9em; color: #555;"></span>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Load initial data for chart
+            fetchData();
+
+            // Restore saved notes from localStorage
+            const notesEl = document.getElementById('notes');
+            const saved = localStorage.getItem('nse_oi_notes');
+            if (saved && notesEl) {
+                notesEl.value = saved;
+            }
+
+            // Wire up save button
+            const saveBtn = document.getElementById('save-notes');
+            const statusEl = document.getElementById('save-status');
+            if (saveBtn && notesEl) {
+                saveBtn.addEventListener('click', () => {
+                    localStorage.setItem('nse_oi_notes', notesEl.value || '');
+                    if (statusEl) {
+                        statusEl.textContent = 'Saved';
+                        setTimeout(() => { statusEl.textContent = ''; }, 2000);
+                    }
+                });
+            }
+        });
+
+        function fetchData() {
+            fetch('/data')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        document.getElementById('oi-ordered-chart').innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
+                        return;
+                    }
+                    
+                    // Update header
+                    document.getElementById('ltp').textContent = data.ltp.toLocaleString('en-IN');
+                    document.getElementById('crontime').textContent = data.crontime;
+
+                    // Generate the Ordered OI Chart
+                    createOrderedOIChart(data);
+                })
+                .catch(error => {
+                    console.error('Fetch error:', error);
+                    document.getElementById('oi-ordered-chart').innerHTML = `<p style="color: red;">Error fetching data. Check server logs.</p>`;
+                });
+        }
+
+        function createOrderedOIChart(data) {
+
+            // Prefer strikes near spot price (LTP) if available
+            const strikes = (data.near_strikes && data.near_strikes.length)
+                ? data.near_strikes
+                : [...new Set([...data.ce_strikes, ...data.pe_strikes])].sort((a, b) => a - b);
+
+            const ceOi = (data.near_ce_oi && data.near_ce_oi.length)
+                ? data.near_ce_oi
+                : data.ce_oi;
+
+            const peOi = (data.near_pe_oi && data.near_pe_oi.length)
+                ? data.near_pe_oi
+                : data.pe_oi;
+
+            // 1. Create Traces for calls and puts aligned on the same strikes
+            const call_trace = {
+                x: strikes,
+                y: ceOi,
+                name: 'Call OI (Resistance)',
+                type: 'bar',
+                marker: { color: 'red' },
+                opacity: 0.7, // Add transparency
+                hovertemplate: '<b>Strike: %{x}</b><br>Call OI: %{y:,}<extra></extra>'
+            };
+
+            const put_trace = {
+                x: strikes,
+                y: peOi,
+                name: 'Put OI (Support)',
+                type: 'bar',
+                marker: { color: 'green' },
+                opacity: 0.7, // Add transparency
+                hovertemplate: '<b>Strike: %{x}</b><br>Put OI: %{y:,}<extra></extra>'
+            };
+
+            // 2. Define Layout
+            const layout = {
+                title: 'Top Open Interest (OI) by Strike Price',
+                xaxis: { 
+                    title: 'Strike Price',
+                    // Use strikes as categories to force a fixed, sorted order on the x-axis
+                    categoryorder: 'array',
+                    categoryarray: strikes,
+                },
+                yaxis: { 
+                    title: 'Open Interest (Contracts)',
+                    tickformat: ',.0f',
+                },
+                barmode: 'overlay', // Overlay is better when strikes can overlap
+                hovermode: 'closest',
+                
+                // 4. Add Spot Price Line
+                shapes: [{
+                    type: 'line',
+                    // The 'x' coordinates must match the numerical value of the strike price
+                    x0: data.ltp,
+                    x1: data.ltp,
+                    y0: 0,
+                    y1: 1,
+                    xref: 'x',
+                    yref: 'paper', // 'paper' ensures the line spans the whole height
+                    line: {
+                        color: 'blue',
+                        width: 3,
+                        dash: 'dash'
+                    }
+                }],
+                // 5. Add Spot Price Annotation
+                annotations: [{
+                    x: data.ltp,
+                    y: 1.05,
+                    yref: 'paper',
+                    text: `LTP: ${data.ltp.toLocaleString('en-IN')}`,
+                    showarrow: false,
+                    font: { color: 'blue', size: 14, weight: 'bold' }
+                }]
+            };
+
+            Plotly.newPlot('oi-ordered-chart', [call_trace, put_trace], layout);
+        }
+    </script>
+</body>
+</html>
